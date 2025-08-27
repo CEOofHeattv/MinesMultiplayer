@@ -74,7 +74,7 @@ export class GameManager {
     if (!game) return;
 
     // Start placement phase timer
-    this.startTimer(gameId, 30, () => {
+    this.startTimer(gameId, 10, () => {
       // Auto-place random bombs if players don't place them in time
       this.autoPlaceBombs(gameId);
       this.startGameplayPhase(gameId);
@@ -139,12 +139,12 @@ export class GameManager {
     if (!game) return;
 
     game.state.phase = 'gameplay';
-    game.state.timeLeft = 15; // 15 seconds per turn
+    game.state.timeLeft = 5; // 5 seconds per turn
     game.state.currentPlayer = game.creator; // Start with creator
     
     console.log(`Starting gameplay phase for game ${gameId}`);
     
-    this.startTimer(gameId, 15, () => {
+    this.startTimer(gameId, 5, () => {
       this.handleRoundTimeout(gameId);
     });
   }
@@ -177,10 +177,10 @@ export class GameManager {
     // Continue game - switch turns
     game.state.currentPlayer = opponentId;
     game.state.round++;
-    game.state.timeLeft = 15;
+    game.state.timeLeft = 5;
     
     this.clearTimer(gameId);
-    this.startTimer(gameId, 15, () => {
+    this.startTimer(gameId, 5, () => {
       this.handleRoundTimeout(gameId);
     });
 
