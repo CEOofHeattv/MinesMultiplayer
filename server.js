@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -11,21 +12,28 @@ const server = createServer(app);
 const io = new Server(server, {
   cors: {
     origin: process.env.NODE_ENV === 'production' 
-      ? ["https://your-frontend-domain.com", "https://bolt.new"] 
+      ? ["https://multiplayer-pvp-mine-yjkq.bolt.host", "https://bolt.new"] 
       : "*",
-    methods: ["GET", "POST"]
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? ["https://multiplayer-pvp-mine-yjkq.bolt.host", "https://bolt.new"] 
+    : "*",
+  credentials: true
+}));
 app.use(express.json());
 
 // Basic HTTP route for health check
 app.get('/', (req, res) => {
   res.json({ 
-    status: 'Game server is running',
+    status: 'Mines Game Server is running',
     port: PORT,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
@@ -33,7 +41,8 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy',
     games: gameManager.games.size,
-    connections: io.engine.clientsCount
+    connections: io.engine.clientsCount,
+    uptime: process.uptime()
   });
 });
 
@@ -53,31 +62,22 @@ io.on('connection', (socket) => {
       const gameWallet = await solanaService.createGameWallet();
       console.log('Created game wallet:', gameWallet.publicKey.toString());
       
-      // Validate creator's bet amount
-      const betValidation = await solanaService.validateBet(gameData.creator, gameData.betAmount);
-      
-      if (!betValidation.valid) {
-        callback({ success: false, error: 'Insufficient funds or invalid bet amount' });
-        return;
-      }
-
       // Create the game with the new wallet
       const game = gameManager.createGame({
         ...gameData,
         gameWallet: gameWallet.publicKey.toString(),
-        gameWalletSecret: gameWallet.secretKey
+        gameWalletSecret: Array.from(gameWallet.secretKey)
       });
 
-      // Transfer creator's bet to the game wallet
-      await solanaService.transferBet(gameData.creator, gameWallet.publicKey, gameData.betAmount);
-      console.log(`Creator ${gameData.creator} transferred ${gameData.betAmount} SOL to game wallet`);
-      
       socket.join(game.id);
       callback({ success: true, game });
       
       // Immediately broadcast the new game to all clients so it appears in "Open Games"
       io.emit('open-games', gameManager.getOpenGames());
       console.log('Game created and broadcasted to open games list');
+      
+      // Also emit to the creator that they joined their own game (for UI updates)
+      socket.emit('game-joined', game);
       
     } catch (error) {
       console.error('Error creating game:', error);
@@ -101,15 +101,28 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Validate joining player has sufficient funds
-      const betValidation = await solanaService.validateBet(data.playerId, data.betAmount);
-      if (!betValidation.valid) {
-        callback({ success: false, error: 'Insufficient funds' });
+      // Validate BOTH players have sufficient funds before proceeding
+      const creatorValidation = await solanaService.validateBet(game.creator, game.betAmount);
+      const joinerValidation = await solanaService.validateBet(data.playerId, data.betAmount);
+      
+      if (!creatorValidation.valid) {
+        callback({ success: false, error: 'Creator has insufficient funds' });
+        return;
+      }
+      
+      if (!joinerValidation.valid) {
+        callback({ success: false, error: 'You have insufficient funds' });
         return;
       }
 
-      // Transfer joining player's bet to the same game wallet
+      // Transfer BOTH players' bets to the game wallet
       const gameWallet = new PublicKey(game.gameWallet);
+      
+      // Transfer creator's bet first
+      await solanaService.transferBet(game.creator, gameWallet, game.betAmount);
+      console.log(`Creator ${game.creator} transferred ${game.betAmount} SOL to game wallet`);
+      
+      // Transfer joining player's bet to the game wallet
       await solanaService.transferBet(data.playerId, gameWallet, data.betAmount);
       console.log(`Player ${data.playerId} transferred ${data.betAmount} SOL to game wallet`);
       console.log(`Game wallet now has ${game.betAmount * 2} SOL total prize pool`);
@@ -166,7 +179,7 @@ io.on('connection', (socket) => {
         const game = gameManager.getGame(gameId);
         if (game && result.winner) {
           await solanaService.payoutWinner(
-            game.gameWalletSecret,
+            new Uint8Array(game.gameWalletSecret),
             result.winner,
             game.betAmount * 2
           );
@@ -202,8 +215,9 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3001;
 
-server.listen(PORT, () => {
-  console.log(`Game server running on port ${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Mines Game Server running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
 export { app, server };
