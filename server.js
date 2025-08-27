@@ -11,8 +11,8 @@ const server = createServer(app);
 const io = new Server(server, {
   cors: {
     origin: process.env.NODE_ENV === 'production' 
-      ? ["https://bolt.new", "https://stackblitz.com", /\.bolt\.new$/, /\.stackblitz\.io$/] 
-      : ["http://localhost:5173", "http://localhost:3000"],
+      ? ["https://your-frontend-domain.com", "https://bolt.new"] 
+      : "*",
     methods: ["GET", "POST"]
   }
 });
@@ -49,8 +49,11 @@ io.on('connection', (socket) => {
     try {
       console.log('Creating game:', gameData);
       
-      // Create game wallet and validate bet
+      // Create a new game wallet for this specific game
       const gameWallet = await solanaService.createGameWallet();
+      console.log('Created game wallet:', gameWallet.publicKey.toString());
+      
+      // Validate creator's bet amount
       const betValidation = await solanaService.validateBet(gameData.creator, gameData.betAmount);
       
       if (!betValidation.valid) {
@@ -58,20 +61,23 @@ io.on('connection', (socket) => {
         return;
       }
 
+      // Create the game with the new wallet
       const game = gameManager.createGame({
         ...gameData,
         gameWallet: gameWallet.publicKey.toString(),
         gameWalletSecret: gameWallet.secretKey
       });
 
-      // Transfer bet to game wallet
+      // Transfer creator's bet to the game wallet
       await solanaService.transferBet(gameData.creator, gameWallet.publicKey, gameData.betAmount);
+      console.log(`Creator ${gameData.creator} transferred ${gameData.betAmount} SOL to game wallet`);
       
       socket.join(game.id);
       callback({ success: true, game });
       
-      // Broadcast updated games list
+      // Immediately broadcast the new game to all clients so it appears in "Open Games"
       io.emit('open-games', gameManager.getOpenGames());
+      console.log('Game created and broadcasted to open games list');
       
     } catch (error) {
       console.error('Error creating game:', error);
@@ -89,36 +95,40 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Validate bet amount matches
+      // Ensure the joining player bets the exact same amount as the creator
       if (data.betAmount !== game.betAmount) {
-        callback({ success: false, error: 'Bet amount must match game bet' });
+        callback({ success: false, error: `Bet amount must be exactly ${game.betAmount} SOL` });
         return;
       }
 
-      // Validate and transfer bet
+      // Validate joining player has sufficient funds
       const betValidation = await solanaService.validateBet(data.playerId, data.betAmount);
       if (!betValidation.valid) {
         callback({ success: false, error: 'Insufficient funds' });
         return;
       }
 
+      // Transfer joining player's bet to the same game wallet
       const gameWallet = new PublicKey(game.gameWallet);
       await solanaService.transferBet(data.playerId, gameWallet, data.betAmount);
+      console.log(`Player ${data.playerId} transferred ${data.betAmount} SOL to game wallet`);
+      console.log(`Game wallet now has ${game.betAmount * 2} SOL total prize pool`);
 
-      // Join game
+      // Add the player to the game
       const updatedGame = gameManager.joinGame(data.gameId, data.playerId);
       
       socket.join(data.gameId);
       callback({ success: true, game: updatedGame });
       
-      // Notify both players
+      // Notify both players that the game is starting
       io.to(data.gameId).emit('game-started', updatedGame);
       
-      // Start game timer
+      // Start the game (bomb placement phase)
       gameManager.startGame(data.gameId);
       
-      // Broadcast updated games list
+      // Remove this game from open games list since it's now full
       io.emit('open-games', gameManager.getOpenGames());
+      console.log('Game started with both players, removed from open games');
       
     } catch (error) {
       console.error('Error joining game:', error);
