@@ -12,7 +12,7 @@ const server = createServer(app);
 const io = new Server(server, {
   cors: {
     origin: process.env.NODE_ENV === 'production' 
-      ? ["https://multiplayer-pvp-mine-yjkq.bolt.host", "https://bolt.new"] 
+      ? ["https://multiplayer-pvp-mine-yjkq.bolt.host", "https://bolt.new", "https://bolt.host"] 
       : "*",
     methods: ["GET", "POST"],
     credentials: true
@@ -21,7 +21,7 @@ const io = new Server(server, {
 
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? ["https://multiplayer-pvp-mine-yjkq.bolt.host", "https://bolt.new"] 
+    ? ["https://multiplayer-pvp-mine-yjkq.bolt.host", "https://bolt.new", "https://bolt.host"] 
     : "*",
   credentials: true
 }));
@@ -70,7 +70,18 @@ io.on('connection', (socket) => {
       });
 
       socket.join(game.id);
-      callback({ success: true, game });
+      
+      // Return the game data including the wallet address
+      const gameResponse = {
+        success: true,
+        game: {
+          ...game,
+          gameWallet: gameWallet.publicKey.toString()
+        }
+      };
+      
+      callback(gameResponse);
+      console.log('Game creation response sent:', gameResponse);
       
       // Immediately broadcast the new game to all clients so it appears in "Open Games"
       io.emit('open-games', gameManager.getOpenGames());
