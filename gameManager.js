@@ -22,7 +22,7 @@ export class GameManager {
       state: {
         phase: 'placement',
         round: 1,
-        timeLeft: 10,
+        timeLeft: 30, // Increased placement time
         currentPlayer: gameData.creator,
         playerBombs: {},
         revealedFields: Array(gridSize).fill(null).map(() => Array(gridSize).fill(false))
@@ -65,7 +65,8 @@ export class GameManager {
         betAmount: game.betAmount,
         status: game.status,
         createdAt: game.createdAt
-      }));
+      }))
+      .sort((a, b) => b.createdAt - a.createdAt); // Sort by newest first
   }
 
   startGame(gameId) {
@@ -73,9 +74,48 @@ export class GameManager {
     if (!game) return;
 
     // Start placement phase timer
-    this.startTimer(gameId, 10, () => {
+    this.startTimer(gameId, 30, () => {
+      // Auto-place random bombs if players don't place them in time
+      this.autoPlaceBombs(gameId);
       this.startGameplayPhase(gameId);
     });
+  }
+
+  autoPlaceBombs(gameId) {
+    const game = this.games.get(gameId);
+    if (!game) return;
+
+    const gridSize = parseInt(game.size.charAt(0));
+    const players = [game.creator, game.opponent].filter(Boolean);
+
+    players.forEach(playerId => {
+      if (!game.bombPlacements[playerId]) {
+        // Auto-place random bombs
+        const bombs = Array(gridSize).fill(null).map(() => Array(gridSize).fill(0));
+        const positions = [];
+        
+        // Generate all possible positions
+        for (let x = 0; x < gridSize; x++) {
+          for (let y = 0; y < gridSize; y++) {
+            positions.push([x, y]);
+          }
+        }
+        
+        // Randomly select bomb positions
+        for (let i = 0; i < game.bombs; i++) {
+          if (positions.length > 0) {
+            const randomIndex = Math.floor(Math.random() * positions.length);
+            const [x, y] = positions.splice(randomIndex, 1)[0];
+            bombs[x][y] = 1;
+          }
+        }
+        
+        game.bombPlacements[playerId] = bombs;
+        console.log(`Auto-placed bombs for player ${playerId} in game ${gameId}`);
+      }
+    });
+
+    game.bothPlayersReady = true;
   }
 
   confirmBombPlacement(gameId, playerId, bombs) {
@@ -83,11 +123,13 @@ export class GameManager {
     if (!game) return;
 
     game.bombPlacements[playerId] = bombs;
+    console.log(`Player ${playerId} confirmed bomb placement in game ${gameId}`);
     
     // Check if both players have placed bombs
     const playerCount = Object.keys(game.bombPlacements).length;
     if (playerCount === 2) {
       game.bothPlayersReady = true;
+      this.clearTimer(gameId);
       this.startGameplayPhase(gameId);
     }
   }
@@ -97,10 +139,12 @@ export class GameManager {
     if (!game) return;
 
     game.state.phase = 'gameplay';
-    game.state.timeLeft = 5;
+    game.state.timeLeft = 15; // 15 seconds per turn
     game.state.currentPlayer = game.creator; // Start with creator
     
-    this.startTimer(gameId, 5, () => {
+    console.log(`Starting gameplay phase for game ${gameId}`);
+    
+    this.startTimer(gameId, 15, () => {
       this.handleRoundTimeout(gameId);
     });
   }
@@ -108,6 +152,7 @@ export class GameManager {
   revealField(gameId, playerId, x, y) {
     const game = this.games.get(gameId);
     if (!game) throw new Error('Game not found');
+    if (game.state.phase !== 'gameplay') throw new Error('Game not in gameplay phase');
     if (game.state.currentPlayer !== playerId) throw new Error('Not your turn');
     if (game.state.revealedFields[x][y]) throw new Error('Field already revealed');
 
@@ -120,19 +165,22 @@ export class GameManager {
     
     game.state.revealedFields[x][y] = true;
     
+    console.log(`Player ${playerId} revealed field [${x},${y}] with content: ${content}`);
+    
     if (hasBomb) {
       // Player hit bomb - loses round
       const winner = opponentId;
-      this.endGame(gameId);
+      console.log(`Game ${gameId} ended. Winner: ${winner}`);
       return { gameEnded: true, winner, content };
     }
 
     // Continue game - switch turns
     game.state.currentPlayer = opponentId;
     game.state.round++;
-    game.state.timeLeft = 5;
+    game.state.timeLeft = 15;
     
-    this.startTimer(gameId, 5, () => {
+    this.clearTimer(gameId);
+    this.startTimer(gameId, 15, () => {
       this.handleRoundTimeout(gameId);
     });
 
@@ -143,10 +191,12 @@ export class GameManager {
     const game = this.games.get(gameId);
     if (!game) return;
 
+    console.log(`Round timeout in game ${gameId}. Current player: ${game.state.currentPlayer}`);
+    
     // Current player loses due to timeout
     const winner = game.state.currentPlayer === game.creator ? game.opponent : game.creator;
-    this.endGame(gameId);
     
+    console.log(`Game ${gameId} ended due to timeout. Winner: ${winner}`);
     return { winner };
   }
 
@@ -158,24 +208,41 @@ export class GameManager {
     game.state.phase = 'ended';
     
     this.clearTimer(gameId);
-    this.games.delete(gameId);
+    
+    console.log(`Game ${gameId} ended and cleaned up`);
+    
+    // Clean up after a delay to allow final messages
+    setTimeout(() => {
+      this.games.delete(gameId);
+    }, 5000);
   }
 
   exitGame(gameId, playerId) {
     const game = this.games.get(gameId);
     if (!game) return;
 
-    if (game.creator === playerId) {
-      // Creator leaves - cancel game
+    console.log(`Player ${playerId} exiting game ${gameId}`);
+
+    if (game.creator === playerId && !game.opponent) {
+      // Creator leaves before anyone joins - just delete the game
+      this.endGame(gameId);
+    } else if (game.creator === playerId || game.opponent === playerId) {
+      // Player leaves during active game - opponent wins by forfeit
+      const winner = game.creator === playerId ? game.opponent : game.creator;
+      console.log(`Player ${playerId} forfeited. Winner: ${winner}`);
+      // Handle forfeit payout if needed
       this.endGame(gameId);
     }
   }
 
   handlePlayerDisconnect(playerId) {
+    console.log(`Handling disconnect for player ${playerId}`);
+    
     // Handle player disconnection
     for (const [gameId, game] of this.games.entries()) {
       if (game.creator === playerId || game.opponent === playerId) {
-        this.endGame(gameId);
+        console.log(`Player ${playerId} disconnected from game ${gameId}`);
+        this.exitGame(gameId, playerId);
       }
     }
   }
@@ -212,6 +279,26 @@ export class GameManager {
   }
 
   generateGameId() {
-    return Math.random().toString(36).substring(2, 15);
+    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  }
+
+  // Cleanup old games periodically
+  cleanupOldGames() {
+    const now = Date.now();
+    const maxAge = 30 * 60 * 1000; // 30 minutes
+
+    for (const [gameId, game] of this.games.entries()) {
+      if (now - game.createdAt > maxAge) {
+        console.log(`Cleaning up old game ${gameId}`);
+        this.endGame(gameId);
+      }
+    }
   }
 }
+
+// Clean up old games every 10 minutes
+setInterval(() => {
+  if (global.gameManager) {
+    global.gameManager.cleanupOldGames();
+  }
+}, 10 * 60 * 1000);
