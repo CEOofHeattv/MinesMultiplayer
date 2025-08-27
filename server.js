@@ -102,31 +102,51 @@ io.on('connection', (socket) => {
       
       const game = gameManager.getGame(data.gameId);
       if (!game) {
-        callback({ success: false, error: 'Game not found' });
+        console.error('Game not found:', data.gameId);
+        return callback({ success: false, error: 'Game not found' });
+      }
+
+      if (game.status !== 'waiting') {
+        console.error('Game not available for joining:', game.status);
+        return callback({ success: false, error: 'Game is no longer available' });
+      }
+
+      if (game.opponent) {
+        console.error('Game already full');
+        return callback({ success: false, error: 'Game is already full' });
+      }
+
+      if (game.creator === data.playerId) {
+        console.error('Player trying to join own game');
+        return callback({ success: false, error: 'Cannot join your own game' });
+      }
+
+      if (!data.playerId) {
+        console.error('No player ID provided');
+        return callback({ success: false, error: 'Player ID is required' });
+      }
+
+      if (!data.betAmount || data.betAmount !== game.betAmount) {
+        console.error('Invalid bet amount:', data.betAmount, 'expected:', game.betAmount);
+        return callback({ success: false, error: `Bet amount must be exactly ${game.betAmount} SOL` });
         return;
       }
 
-      // Ensure the joining player bets the exact same amount as the creator
-      if (data.betAmount !== game.betAmount) {
-        callback({ success: false, error: `Bet amount must be exactly ${game.betAmount} SOL` });
-        return;
-      }
-
-      // Validate BOTH players have sufficient funds before proceeding
+      console.log('Validating player funds...');
       const creatorValidation = await solanaService.validateBet(game.creator, game.betAmount);
       const joinerValidation = await solanaService.validateBet(data.playerId, data.betAmount);
       
       if (!creatorValidation.valid) {
-        callback({ success: false, error: 'Creator has insufficient funds' });
-        return;
+        console.error('Creator has insufficient funds');
+        return callback({ success: false, error: 'Creator has insufficient funds' });
       }
       
       if (!joinerValidation.valid) {
-        callback({ success: false, error: 'You have insufficient funds' });
-        return;
+        console.error('Joiner has insufficient funds');
+        return callback({ success: false, error: 'You have insufficient funds' });
       }
 
-      // Transfer BOTH players' bets to the game wallet
+      console.log('Processing bet transfers...');
       const gameWallet = new PublicKey(game.gameWallet);
       
       // Transfer creator's bet first
@@ -141,8 +161,11 @@ io.on('connection', (socket) => {
       // Add the player to the game
       const updatedGame = gameManager.joinGame(data.gameId, data.playerId);
       
+      console.log('Player successfully joined game:', updatedGame.id);
       socket.join(data.gameId);
-      callback({ success: true, game: updatedGame });
+      
+      const response = { success: true, game: updatedGame };
+      callback(response);
       
       // Notify both players that the game is starting
       io.to(data.gameId).emit('game-started', updatedGame);
