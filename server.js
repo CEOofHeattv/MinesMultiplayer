@@ -163,6 +163,15 @@ io.on('connection', (socket) => {
       // Start the game (bomb placement phase)
       gameManager.startGame(data.gameId);
       
+      // Send initial game state to both players
+      const gameState = {
+        phase: 'placement',
+        round: 1,
+        currentPlayer: '',
+        timeLeft: 10
+      };
+      io.to(data.gameId).emit('game-state-update', gameState);
+      
       // Remove this game from open games list since it's now full
       io.emit('open-games', gameManager.getOpenGames());
       console.log('Game started with both players, removed from open games');
@@ -185,8 +194,13 @@ io.on('connection', (socket) => {
       // Check if both players confirmed
       const game = gameManager.getGame(gameId);
       if (game && game.bothPlayersReady) {
-        gameManager.startGameplayPhase(gameId);
-        io.to(gameId).emit('game-state-update', game.state);
+        setTimeout(() => {
+          gameManager.startGameplayPhase(gameId);
+          const updatedGame = gameManager.getGame(gameId);
+          if (updatedGame) {
+            io.to(gameId).emit('game-state-update', updatedGame.state);
+          }
+        }, 1000); // Small delay to ensure smooth transition
       }
     } catch (error) {
       console.error('Error confirming bomb placement:', error);
@@ -213,7 +227,10 @@ io.on('connection', (socket) => {
         gameManager.endGame(gameId);
       } else {
         io.to(gameId).emit('field-revealed', { x, y, content: result.content });
-        io.to(gameId).emit('game-state-update', gameManager.getGame(gameId).state);
+        const updatedGame = gameManager.getGame(gameId);
+        if (updatedGame) {
+          io.to(gameId).emit('game-state-update', updatedGame.state);
+        }
       }
     } catch (error) {
       console.error('Error revealing field:', error);
