@@ -11,7 +11,7 @@ const server = createServer(app);
 const io = new Server(server, {
   cors: {
     origin: process.env.NODE_ENV === 'production' 
-      ? ["https://your-frontend-domain.com", "https://bolt.new"] 
+      ? ["https://bolt.new", "https://stackblitz.com", /\.bolt\.new$/, /\.stackblitz\.io$/] 
       : ["http://localhost:5173", "http://localhost:3000"],
     methods: ["GET", "POST"]
   }
