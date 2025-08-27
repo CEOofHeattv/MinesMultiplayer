@@ -133,13 +133,7 @@ io.on('connection', (socket) => {
       }
 
       console.log('Validating player funds...');
-      const creatorValidation = await solanaService.validateBet(game.creator, game.betAmount);
       const joinerValidation = await solanaService.validateBet(data.playerId, data.betAmount);
-      
-      if (!creatorValidation.valid) {
-        console.error('Creator has insufficient funds');
-        return callback({ success: false, error: 'Creator has insufficient funds' });
-      }
       
       if (!joinerValidation.valid) {
         console.error('Joiner has insufficient funds');
@@ -149,14 +143,10 @@ io.on('connection', (socket) => {
       console.log('Processing bet transfers...');
       const gameWallet = new PublicKey(game.gameWallet);
       
-      // Transfer creator's bet first
-      await solanaService.transferBet(game.creator, gameWallet, game.betAmount);
-      console.log(`Creator ${game.creator} transferred ${game.betAmount} SOL to game wallet`);
-      
       // Transfer joining player's bet to the game wallet
       await solanaService.transferBet(data.playerId, gameWallet, data.betAmount);
       console.log(`Player ${data.playerId} transferred ${data.betAmount} SOL to game wallet`);
-      console.log(`Game wallet now has ${game.betAmount * 2} SOL total prize pool`);
+      console.log(`Game wallet now has ${game.betAmount * 2} SOL total prize pool (creator already deposited when creating game)`);
 
       // Add the player to the game
       const updatedGame = gameManager.joinGame(data.gameId, data.playerId);
