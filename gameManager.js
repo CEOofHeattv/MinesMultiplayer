@@ -17,7 +17,7 @@ export class GameManager {
       betAmount: gameData.betAmount,
       gameWallet: gameData.gameWallet,
       gameWalletSecret: gameData.gameWalletSecret,
-      status: 'waiting',
+      status: 'waiting', // This keeps the game in "open games" until someone joins
       createdAt: Date.now(),
       state: {
         phase: 'placement',
@@ -32,6 +32,7 @@ export class GameManager {
     };
 
     this.games.set(gameId, game);
+    console.log(`Game ${gameId} created with wallet ${gameData.gameWallet}`);
     return game;
   }
 
@@ -42,9 +43,10 @@ export class GameManager {
     if (game.creator === playerId) throw new Error('Cannot join your own game');
 
     game.opponent = playerId;
-    game.status = 'in-progress';
+    game.status = 'in-progress'; // This removes it from "open games"
     
     this.games.set(gameId, game);
+    console.log(`Player ${playerId} joined game ${gameId}`);
     return game;
   }
 
